@@ -1,0 +1,105 @@
+---
+- name: Enterprise RHEL 10 Image Mode Deployment
+  hosts: localhost
+  connection: local
+  vars_files:
+    - vars/secrets.yml
+  vars:
+    # Project Config
+    containerfile_name: "ContainerFile"
+    quay_repo: "isrealvarela"
+    image_name: "rhel10-bootc"
+    full_image_path: "quay.io/{{ quay_repo }}/{{ image_name }}:latest"
+    builder_image: "registry.redhat.io/rhel10/bootc-image-builder:latest"  
+  
+    # Proxmox Config
+    pm_host: "pve1"
+    pm_vmid: 400
+    pm_storage: "local-lvm"
+
+  tasks:
+    # -------------------------------------------------------------------------
+    # SECTION 1: USER-SPACE BUILD
+    # -------------------------------------------------------------------------
+    - name: Section 1 - Registry Preparation
+      block:
+        - name: Ensure authenticated to Red Hat Registry
+          containers.podman.podman_login:
+            registry: registry.redhat.io
+            username: "{{ vault_rh_username }}"
+            password: "{{ vault_rh_password }}"
+
+        - name: Ensure authenticated to Quay.io
+          containers.podman.podman_login:
+            registry: quay.io
+            username: "{{ quay_repo }}"
+            password: "{{ vault_quay_token }}"
+
+    - name: Section 2 - Build and Push
+      block:
+        - name: Build Bootc Container Image
+          containers.podman.podman_image:
+            name: "{{ full_image_path }}"
+            path: "."
+            build:
+              file: "{{ containerfile_name }}"
+            force: yes # Essential for Architect demos to ensure "latest" is fresh
+
+        - name: Push to Quay
+          containers.podman.podman_image:
+            name: "{{ full_image_path }}"
+            push: yes
+
+    - name: Section 3 - Local Image Mode Conversion
+      become: true
+      command: >
+        podman run --rm --privileged
+        -v ./output:/output
+        -v /var/lib/containers/storage:/var/lib/containers/storage
+        -v {{ lookup('env', 'XDG_RUNTIME_DIR') }}/containers/auth.json:/run/containers/0/auth.json:Z
+        registry.redhat.io/rhel10/bootc-image-builder:latest
+        --type qcow2 {{ full_image_path }}
+
+    - name: Section 4 - Proxmox Orchestration
+      tags: deploy
+      block:
+        - name: Upload Disk Image to Proxmox
+          shell: >
+            scp -o StrictHostKeyChecking=no
+            ./output/qcow2/disk.qcow2
+            root@{{ pm_host }}:/var/lib/vz/template/qcow/{{ image_name }}.qcow2
+          delegate_to: localhost
+
+            # - name: Verify execution host
+            #   shell: >
+            #     "hostname && which qm"
+            #   delegate_to: "{{ pm_host }}" 
+            #   register: qm_check
+
+            # - debug:
+            #     var: qm_check.stdout_lines
+
+        - name: Define and Boot VM
+          # Using shell here as it provides the most direct control over Proxmox CLI
+          # but we wrap it in 'when' or 'changed_when' for better reporting
+          vars:
+            # Force SSH and bypass key confirmation for the demo
+            ansible_connection: ssh
+            ansible_ssh_extra_args: '-o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null'
+            ansible_user: root
+          become: false
+          shell: |
+            qm stop {{ pm_vmid }} || true
+            qm destroy {{ pm_vmid }} || true
+            qm create {{ pm_vmid }} --name {{ image_name }} --memory 4096 --cores 2 --cpu host --net0 virtio,bridge=vmbr0 --agent 1
+            qm importdisk {{ pm_vmid }} /var/lib/vz/template/qcow/{{ image_name }}.qcow2 {{ pm_storage }}
+            qm set {{ pm_vmid }} --scsihw virtio-scsi-pci --scsi0 {{ pm_storage }}:vm-{{ pm_vmid }}-disk-0 --boot "order=scsi0"
+            qm start {{ pm_vmid }}
+          delegate_to: "{{ pm_host }}"
+
+        - name: Cleanup local build artifacts
+          ansible.builtin.file:
+            path: "./output/qcow2/disk.qcow2"
+            state: absent
+          delegate_to: localhost
+          tags: cleanup

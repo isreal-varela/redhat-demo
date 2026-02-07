@@ -1,0 +1,28 @@
+FROM registry.redhat.io/rhel10/rhel-bootc:latest
+
+# Install Packages
+RUN dnf -y install httpd virtio-win qemu-guest-agent \
+ greenboot greenboot-default-health-checks \
+ && dnf clean all
+
+# Set up Greenboot (RHEL helth check framework)
+RUN mkdir -p /etc/greenboot/check/required.d/
+RUN cat <<EOF > /etc/greenboot/check/required.d/01_httpd_check.sh
+#!/bin/bash
+# Check if Apache is responding on localhost
+curl -f http://localhost/ || exit 1
+EOF
+RUN chmod +x /etc/greenboot/check/required.d/01_httpd_check.sh
+
+# 1. Create Immutable Web Root
+RUN mkdir -p /usr/share/www/html
+RUN echo "<h1>Hello from RHEL Image Mode Yo</h1>" > /usr/share/www/html/index.html
+
+# 2. Reconfigure Apache to use the Immutable Path
+RUN sed -i 's|/var/www/html|/usr/share/www/html|g' /etc/httpd/conf/httpd.conf
+
+# 3. Enable Service
+RUN systemctl enable httpd
+
+# 4. Set Password (for demo)
+RUN echo "root:RedHat1234" | chpasswd

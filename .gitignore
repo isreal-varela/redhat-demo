@@ -1,0 +1,19 @@
+# Ansible Vault & Secrets
+*.vault
+.ansible_vault
+vars/secrets.yml.unencrypted
+
+# Large Build Artifacts (Crucial for bootc)
+output/
+*.qcow2
+*.iso
+
+# Python/Environment
+__pycache__/
+*.pyc
+myenv/
+.venv/
+
+# Local configuration
+ansible_cache/
+.DS_Store
