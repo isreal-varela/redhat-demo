@@ -6,7 +6,7 @@ ARG GIT_COMMIT=unknown
 # Install Packages
 RUN dnf -y install httpd virtio-win qemu-guest-agent \
  greenboot greenboot-default-health-checks \
- && dnf clean all
+ && dnf update -y && dnf clean all
 
 # Set up Greenboot (RHEL helth check framework)
 RUN mkdir -p /etc/greenboot/check/required.d/
