@@ -1,87 +1,106 @@
-RHEL 10 Image Mode to Proxmox Pipeline
-This project automates the creation of a bootable RHEL 10 Container, converts it into a QCOW2 disk image using the bootc-image-builder, and orchestrates the deployment to a Proxmox VE cluster.
+# RHEL 10 Bootc Deployment: Image Mode to Proxmox
 
-🚀 Key Features
-Immutable Infrastructure: Apache is configured to serve content from /usr/share/www/html, leveraging the immutable nature of the bootc runtime.
+![Ansible](https://img.shields.io/badge/Ansible-2.15+-red.svg)
+![RHEL](https://img.shields.io/badge/RHEL-10-brightgreen.svg)
+![Podman](https://img.shields.io/badge/Podman-4.0+-purple.svg)
 
-Greenboot Integration: Includes health checks to ensure the httpd service is functional upon boot; otherwise, the system can auto-rollback.
+This project automates the transition from a **RHEL 10 ContainerFile** to a **bootable Virtual Machine** on Proxmox VE. It solves the "User-to-Root" storage gap required for `bootc-image-builder` and orchestrates the Proxmox CLI for disk injection.
 
-Hybrid Execution: Handles the complex transition between User-space Podman builds and Root-space Image Conversion.
 
-🔐 1. Setup Ansible Vault
-The playbook relies on a vars/secrets.yml file. This file must be encrypted with Ansible Vault to protect your registry credentials and Red Hat Subscription details.
 
-Create the Secrets File
-Create the directory: mkdir vars
+## 🛠️ 1. Project Initialization
+Set your local environment identity and protect your secrets from accidental exposure.
 
-Use the vault to create the file:
+```bash
+# Set Git Identity
+git config --global user.name "Isreal Varela"
+git config --global user.email "isreal@example.com"
+git config --global init.defaultBranch main
 
-Bash
-ansible-vault create vars/secrets.yml
-Required Variables
-Paste the following into your vault file, replacing the values with your actual credentials:
+# Initialize Repository
+git init
 
-YAML
-# Registry Credentials
-vault_quay_token: "your-quay-token-or-password"
-quay_username: "isrealvarela"
+# Create .gitignore to prevent pushing secrets and large binaries
+cat <<EOF > .gitignore
+# Ansible Secrets
+*.vault
+.ansible_vault
+vars/secrets.yml.unencrypted
+~/.ansible_vault_pass
 
-# Red Hat Subscription (Required to pull the base image and builder)
-vault_rh_username: "your-rh-customer-portal-username"
-vault_rh_password: "your-rh-customer-portal-password"
+# Large Build Artifacts
+output/
+*.qcow2
+*.iso
 
-# Proxmox (If using API, otherwise root password for SCP if keys aren't set)
-pm_password: "your-proxmox-root-password"
-📂 2. Project Structure
-ContainerFile: Defines the RHEL 10 OS image, including the immutable web content and Greenboot checks.
+# Python/System
+__pycache__/
+myenv/
+.venv/
+.DS_Store
+EOF
+```
+## 🔐 2. Ansible Vault & Secrets Setup
+We use Ansible Vault to store registry tokens and subscription credentials securely.Create the secrets file:Bashansible-vault create vars/secrets.yml
+Populate with these variables (inside the vault):
+```YAML 
+vault_quay_token: "your_quay_app_token"
+vault_rh_username: "your_rh_portal_user"
+vault_rh_password: "your_rh_portal_password"
+```
+Automate the password (Optional):
+```Bash
+echo "your_vault_password" > ~/.ansible_vault_pass
+```
+## 🏗️ 3. ContainerFile Structure
+The ContainerFile bakes the Git Hash and build date into the image for traceability.
+```Dockerfile
+FROM registry.redhat.io/rhel10/rhel-bootc:latest
 
-rhel_image_mode_deploy.yml: The main automation engine.
+# Build Metadata Argument
+ARG GIT_COMMIT=unknown
 
-inventory.ini: Maps your build machine and the Proxmox target node.
+# Install Packages
+RUN dnf -y install httpd virtio-win qemu-guest-agent \
+ greenboot greenboot-default-health-checks \
+ && dnf clean all
 
-ansible.cfg: Configured for host_key_checking = False to ensure smooth demo flow.
+# Bake Metadata into the image
+RUN echo "Build Date: $(date)" > /etc/image-build-info && \
+    echo "Git Commit: $GIT_COMMIT" >> /etc/image-build-info
 
-🛠️ 3. Prerequisites
-Ensure your local build machine (RHEL 9 or 10) has the following:
+# Enable Apache and set Demo Password
+RUN systemctl enable httpd
+RUN echo "root:RedHat1234" | chpasswd
+```
 
-Podman: sudo dnf install -y podman
+## 📋 4. Execution Strategy
+The playbook is modularized using Tags to allow for granular troubleshooting and faster demos. 
+|Section|Tag|Purpose|
+| ---   |---|---    |
+|Section 1|build|"User-space login, build, and push to Quay."|
+|Section 2|sync|Moves images from user storage to Root storage for the builder.|
+|Section 3|convert|Runs bootc-image-builder to generate the QCOW2.|
+|Section 4|deploy|SCP to Proxmox and VM orchestration via qm CLI.|
 
-Ansible Core & Collections:
 
-Bash
-ansible-galaxy collection install containers.podman community.general
-SSH Keys: Your local SSH key should be authorized on the Proxmox node (ssh-copy-id root@192.168.100.11).
-
-🏃 4. Running the Pipeline
-The Full Run
-This builds the image, syncs it to root, converts it to a disk, and deploys it:
-
-Bash
+## 🚀 5. Running the Pipeline
+Full Automation Run:
+```Bash
 ansible-playbook -i inventory.ini rhel_image_mode_deploy.yml --ask-vault-pass --ask-become-pass
-Iterating on Proxmox Only
-If you've already built the image and just need to tweak the VM settings or re-upload the disk:
-
-Bash
-ansible-playbook -i inventory.ini rhel_image_mode_deploy.yml --tags deploy --ask-vault-pass
-Conversion Only
-To skip the build and just generate the QCOW2 file:
-
-Bash
-ansible-playbook -i inventory.ini rhel_image_mode_deploy.yml --tags convert --ask-become-pass
-🔍 5. Post-Deployment Verification
-Once the VM is up (VMID 400), verify the "Image Mode" characteristics:
-
-Check Immutability:
-
-Bash
-ssh root@192.168.100.205 "touch /usr/bin/test_file"
-# Result: touch: cannot touch '/usr/bin/test_file': Read-only file system
-Verify Web Content:
-
-Bash
-curl http://192.168.100.205
-# Result: <h1>Hello from RHEL Image Mode Yo</h1>
-Check Greenboot Status:
-
-Bash
-ssh root@192.168.100.205 "bootc status"
+```
+Quick Re-Deploy (Proxmox Only):
+```Bash
+ansible-playbook -i inventory.ini rhel_image_mode_deploy.yml --tags deploy
+```
+Sync & Convert (Skip the build phase):
+```Bash
+ansible-playbook -i inventory.ini rhel_image_mode_deploy.yml --tags sync,convert --ask-become-pass
+```
+## 🏁 6. Git Workflow
+```bash
+git add .
+git commit -m "Initial commit: End-to-end RHEL 10 Bootc to Proxmox pipeline"
+git remote add origin <your-repo-url>
+git push -u origin main
+```

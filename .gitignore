@@ -17,3 +17,8 @@ myenv/
 # Local configuration
 ansible_cache/
 .DS_Store
+
+# Ignore Vim swap files
+*.swp
+*.swo
+*~

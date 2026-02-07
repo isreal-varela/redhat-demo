@@ -1,5 +1,8 @@
 FROM registry.redhat.io/rhel10/rhel-bootc:latest
 
+# Build Metadata Argument
+ARG GIT_COMMIT=unknown
+
 # Install Packages
 RUN dnf -y install httpd virtio-win qemu-guest-agent \
  greenboot greenboot-default-health-checks \
@@ -14,6 +17,10 @@ curl -f http://localhost/ || exit 1
 EOF
 RUN chmod +x /etc/greenboot/check/required.d/01_httpd_check.sh
 
+# Bake Metadata into the image
+RUN echo "Build Date: $(date)" > /etc/image-build-info && \
+    echo "Git Commit: $GIT_COMMIT" >> /etc/image-build-info
+
 # 1. Create Immutable Web Root
 RUN mkdir -p /usr/share/www/html
 RUN echo "<h1>Hello from RHEL Image Mode Yo</h1>" > /usr/share/www/html/index.html
@@ -25,4 +32,4 @@ RUN sed -i 's|/var/www/html|/usr/share/www/html|g' /etc/httpd/conf/httpd.conf
 RUN systemctl enable httpd
 
 # 4. Set Password (for demo)
-RUN echo "root:RedHat1234" | chpasswd
+RUN echo "root:*****" | chpasswd
