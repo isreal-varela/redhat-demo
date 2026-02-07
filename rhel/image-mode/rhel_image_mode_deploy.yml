@@ -35,6 +35,10 @@
             registry: registry.redhat.io
             username: "{{ vault_rh_username }}"
             password: "{{ vault_rh_password }}"
+        
+        - name: Get current Git commit hash
+          command: git rev-parse --short HEAD
+          register: git_hash
 
         - name: Build Bootc Container Image
           containers.podman.podman_image:
@@ -42,6 +46,7 @@
             path: "."
             build:
               file: "{{ containerfile_name }}"
+              extra_args: "--build-arg GIT_COMMIT={{ git_hash.stdout }}"
             force: yes
 
         - name: Push to Quay
