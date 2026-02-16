@@ -4,7 +4,7 @@ FROM registry.redhat.io/rhel10/rhel-bootc:latest
 ARG GIT_COMMIT=unknown
 
 # Install Packages
-RUN dnf -y install httpd virtio-win qemu-guest-agent \
+RUN dnf -y install vim httpd virtio-win qemu-guest-agent \
  && dnf update -y && dnf clean all
 
 
