@@ -5,18 +5,8 @@ ARG GIT_COMMIT=unknown
 
 # Install Packages
 RUN dnf -y install httpd virtio-win qemu-guest-agent \
- greenboot greenboot-default-health-checks \
  && dnf update -y && dnf clean all
 
-# Set up Greenboot (RHEL helth check framework)
-RUN mkdir -p /etc/greenboot/check/required.d/
-RUN cat <<EOF > /etc/greenboot/check/required.d/01_httpd_check.sh
-#!/bin/bash
-# Check if Apache is responding on localhost
-curl -f http://localhost/ || exit 1
-sleep 5
-EOF
-RUN chmod +x /etc/greenboot/check/required.d/01_httpd_check.sh
 
 # Bake Metadata into the image
 RUN echo "Build Date: $(date)" > /etc/image-build-info && \
